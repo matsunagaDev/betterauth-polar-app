@@ -5,6 +5,8 @@ import { baseUrl } from '@/lib/base-url';
 import { nextCookies } from 'better-auth/next-js';
 import { anonymous } from 'better-auth/plugins';
 import { nanoid } from 'nanoid'
+import { polar, checkout, portal } from "@polar-sh/better-auth";
+import { polarClient } from '@/lib/polar-client';
 
 export const auth = betterAuth({
   baseURL: baseUrl(),
@@ -29,5 +31,22 @@ export const auth = betterAuth({
   plugins: [
     nextCookies(),
     anonymous(), // 匿名ログイン
-  ],
+    polar({
+        client: polarClient,
+        createCustomerOnSignUp: true,
+        use: [
+          checkout({
+              products: [
+                  {
+                      productId: process.env.POLAR_PRODUCT_ID!,
+                      slug: "test-product"
+                  }
+              ],
+              successUrl: process.env.POLAR_SUCCESS_URL!,
+              authenticatedUsersOnly: true
+          }),
+          portal(),
+        ]
+    }),
+  ]
 });

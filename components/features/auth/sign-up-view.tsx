@@ -154,7 +154,7 @@ export function SignUpView() {
                       <FormControl>
                         <Input
                           type="password"
-                          placeholder="••••••••"
+                          placeholder="パスワードを入力"
                           disabled={isLoading}
                           {...field}
                         />
@@ -173,7 +173,7 @@ export function SignUpView() {
                       <FormControl>
                         <Input
                           type="password"
-                          placeholder="••••••••"
+                          placeholder="確認用パスワードを入力"
                           disabled={isLoading}
                           {...field}
                         />

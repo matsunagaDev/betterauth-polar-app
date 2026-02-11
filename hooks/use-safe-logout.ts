@@ -15,9 +15,10 @@ export const useSafeLogout = () => {
     setIsLoading(true)
     try {
       await authClient.signOut()
+      // 全てのキャッシュをクリア
       queryClient.clear()
       toast.success("ログアウトしました")
-      
+
       // キャッシュ対策でリロード
       router.replace("/sign-in")
       router.refresh();

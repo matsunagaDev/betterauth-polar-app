@@ -1,6 +1,7 @@
 import { createAuthClient } from "better-auth/react";
 import { baseUrl } from "./base-url";
 import { anonymousClient } from "better-auth/client/plugins";
+import { polarClient } from "@polar-sh/better-auth";
 
 /**
  * Better Auth クライアント設定
@@ -14,5 +15,6 @@ export const authClient = createAuthClient({
   baseURL: baseUrl(),
   plugins: [
     anonymousClient(), // ゲストログイン用プラグイン
+    polarClient()
   ],
 });
