@@ -12,24 +12,40 @@ BetterAuth、Polar、Turso を組み合わせた認証・サブスクリプシ�
 - pnpm（`npm install -g pnpm`）
 - Turso CLI（macOS: `brew install tursodatabase/tap/turso`）
 
-## セットアップ
+## クローン後に作成が必要なもの
 
-### 1. 依存関係のインストール
+リポジトリには含まれていないため、以下を**自前で作成**する。
+
+| 種別         | パス                | 作成方法                  |
+| ------------ | ------------------- | ------------------------- |
+| ディレクトリ | `db/local/`         | `mkdir -p db/local`       |
+| ファイル     | `db/local/local.db` | `touch db/local/local.db` |
+| ファイル     | `.env`              | `touch .env`              |
+
+## セットアップ手順
+
+### 1. リポジトリのクローン
+
+```bash
+git clone <リポジトリURL>
+cd betterauth-polar-app
+```
+
+### 2. 依存関係のインストール
 
 ```bash
 pnpm install
 ```
 
-### 2. ローカル DB の準備
+### 3. ローカル DB 用のディレクトリとファイルを作成
 
 ```bash
-mkdir -p db/local
-touch db/local/local.db
+mkdir -p db/local && touch db/local/local.db
 ```
 
-### 3. 環境変数の設定
+### 4. 環境変数を設定
 
-プロジェクト直下に `.env` を作成し、以下を設定する。
+プロジェクト直下に `.env` を作成し、次を設定する。
 
 ```env
 TURSO_DATABASE_URL="http://127.0.0.1:8080"
@@ -41,28 +57,31 @@ POLAR_PRODUCT_ID="Polar の商品 ID"
 POLAR_SUCCESS_URL="http://localhost:3000"
 ```
 
-GitHub ログインを使う場合:
+GitHub ログインを使う場合のみ追加:
 
 ```env
 GITHUB_CLIENT_ID="GitHub OAuth App の Client ID"
 GITHUB_CLIENT_SECRET="GitHub OAuth App の Client Secret"
 ```
 
-### 4. Turso ローカルサーバーの起動
+### 5. Turso ローカルサーバーを起動
 
-**別ターミナルで** 以下を実行し、起動したままにする。
+**別ターミナル**で次を実行し、**起動したまま**にする。
 
 ```bash
 turso dev -f db/local/local.db
 ```
 
-### 5. マイグレーションの実行（初回のみ）
+### 6. マイグレーションを実行
+
+`turso dev` が起動している状態で実行する。  
+（`migrations/` はリポジトリに含まれているため、`generate` は不要）
 
 ```bash
 npx drizzle-kit migrate
 ```
 
-### 6. 開発サーバーの起動
+### 7. 開発サーバーを起動
 
 ```bash
 pnpm dev
@@ -79,8 +98,10 @@ http://localhost:3000 にアクセスする。
 
 ## DB 関連コマンド
 
-| コマンド | 用途 |
-|----------|------|
-| `npx drizzle-kit migrate` | DB にスキーマを反映 |
-| `npx drizzle-kit generate` | スキーマ変更からマイグレーションを生成 |
-| `npx drizzle-kit studio` | DB の GUI を起動 |
+| コマンド                   | 用途                                                     |
+| -------------------------- | -------------------------------------------------------- |
+| `npx drizzle-kit migrate`  | 既存のマイグレーションを DB に適用                       |
+| `npx drizzle-kit generate` | `db/schemas/*.ts` の変更から新しいマイグレーションを生成 |
+| `npx drizzle-kit studio`   | DB の GUI を起動                                         |
+
+スキーマ変更時は、`generate` → `migrate` の順で実行する。
