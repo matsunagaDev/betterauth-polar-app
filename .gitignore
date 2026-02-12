@@ -29,6 +29,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 .env*
+!.env.example
 
 /vercel
 
@@ -39,6 +40,9 @@ next-env.d.ts
 # other
 /docs/
 /db/local/
+
+# Claude Code (個人設定)
+.claude/
 
 # IDE
 .vscode/

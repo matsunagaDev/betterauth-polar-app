@@ -135,7 +135,7 @@ export function SignUpView() {
                       <FormControl>
                         <Input
                           type="email"
-                          placeholder="email@example.com"
+                          placeholder="your-email@gmail.com"
                           disabled={isLoading}
                           {...field}
                         />
