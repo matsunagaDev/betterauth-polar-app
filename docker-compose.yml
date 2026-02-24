@@ -1,12 +1,22 @@
 services:
+  turso:
+    image: ghcr.io/tursodatabase/libsql-server:v0.24.32
+    ports:
+      - "8080:8080"
+    command: ["sqld", "--http-listen-addr", "0.0.0.0:8080"]
+
   app:
     build: .
     ports:
       - "3000:3000"
     env_file:
       - .env
+    environment:
+      - TURSO_DATABASE_URL=http://turso:8080
     volumes:
       - .:/app
       - /app/node_modules
       - /app/.next
-    command: pnpm dev
+    command: sh -c "pnpm drizzle-kit push && pnpm dev"
+    depends_on:
+      - turso
