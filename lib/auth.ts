@@ -11,7 +11,7 @@ import { polarClient } from '@/lib/polar-client';
 export const auth = betterAuth({
   baseURL: baseUrl(),
   database: drizzleAdapter(db, {
-    provider: 'sqlite', // or "pg" or "mysql"
+    provider: 'sqlite',
     usePlural: true,
   }),
   advanced: {
@@ -26,6 +26,10 @@ export const auth = betterAuth({
     github: {
       clientId: process.env.GITHUB_CLIENT_ID!,
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+    },
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     },
   },
   plugins: [
