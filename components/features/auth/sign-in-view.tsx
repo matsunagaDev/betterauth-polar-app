@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Alert, AlertTitle } from "@/components/ui/alert";
 import { OctagonAlertIcon, Github } from "lucide-react";
+import { FcGoogle } from "react-icons/fc";
 
 const formSchema = z.object({
   email: z.email("有効なメールアドレスを入力してください"),
@@ -87,6 +88,23 @@ export function SignInView() {
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "GitHub認証に失敗しました";
+      toast.error(errorMessage);
+      setError(errorMessage);
+      setIsLoading(false);
+    }
+  };
+
+  // Google認証
+  const handleGoogleSignIn = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/",
+      });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Google認証に失敗しました";
       toast.error(errorMessage);
       setError(errorMessage);
       setIsLoading(false);
@@ -187,6 +205,20 @@ export function SignInView() {
             >
               <Github className="mr-2 h-4 w-4" />
               GitHubでサインイン
+            </Button>
+          </Field>
+
+          {/* Google認証 */}
+          <Field>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={handleGoogleSignIn}
+              disabled={isLoading}
+            >
+              <FcGoogle className="mr-2 h-4 w-4" />
+              Googleでサインイン
             </Button>
           </Field>
 
