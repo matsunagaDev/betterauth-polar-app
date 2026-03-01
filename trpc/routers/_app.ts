@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { baseProcedure, createTRPCRouter } from '../init';
 import { genreRouter } from './genre';
 import { onboardingRouter } from './onboarding';
+import { videoRouter } from './video';
 
 export const appRouter = createTRPCRouter({
   hello: baseProcedure
@@ -17,6 +18,7 @@ export const appRouter = createTRPCRouter({
     }),
   genre: genreRouter,
   onboarding: onboardingRouter,
+  video: videoRouter,
 });
 // export type definition of API
 export type AppRouter = typeof appRouter;

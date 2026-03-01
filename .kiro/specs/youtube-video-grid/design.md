@@ -135,7 +135,7 @@ sequenceDiagram
     alt Cache Hit
         Cache-->>VS: Cached response
     else Cache Miss
-        VS->>YT: search.list(videoCategoryId, q)
+        VS->>YT: search.list(q)
         YT-->>VS: Search results
         VS->>Cache: Store with TTL
     end
@@ -304,11 +304,12 @@ interface VideoCache {
 
 | Field | Detail |
 |-------|--------|
-| Intent | アプリ内ジャンルIDをYouTube API検索パラメータに変換する |
+| Intent | アプリ内ジャンルID（DBの`genres.id`）をYouTube search.list APIの検索キーワード（`q`パラメータ）に変換する |
 | Requirements | 3.2, 3.4 |
 
 **Responsibilities & Constraints**
-- ジャンルIDからYouTubeの`videoCategoryId`と補助検索キーワード`q`へのマッピングを提供する
+- ジャンルIDからYouTube search.list APIの`q`パラメータに渡す検索キーワードへのマッピングを提供する
+- YouTube APIの`videoCategoryId`は汎用カテゴリ（Film & Animation, Comedy等）しかなく、アプリのジャンル（アクション, ホラー, SF等）と1:1で対応しないため使用しない。`searchQuery`のみで絞り込みを行う
 - 未マッピングジャンルに対するフォールバック値を定義する
 
 **Dependencies**
@@ -319,7 +320,7 @@ interface VideoCache {
 ##### Service Interface
 ```typescript
 interface YouTubeSearchParams {
-  videoCategoryId: string;
+  /** YouTube search.list API の q パラメータに渡す検索キーワード */
   searchQuery: string;
 }
 
@@ -334,7 +335,7 @@ interface GenreMapping {
 - Invariants: マッピングは定数として定義され、ランタイムで変更されない
 
 **Implementation Notes**
-- Integration: `lib/youtube/genre-mapping.ts`に定数オブジェクトとして定義。ジャンルマスタデータ（`genres`テーブル）のIDに対応
+- Integration: `lib/youtube/genre-mapping.ts`に定数オブジェクトとして定義。キーはDBの`genres`テーブルの`id`カラムと一致する（例: `action`, `comedy`, `sci-fi`）
 - Validation: `isSupported`でマッピング存在確認後、`getYouTubeParams`を呼び出すパターンを推奨
 - Risks: ジャンルマスタデータとマッピングの不整合。緩和策として未マッピング時のフォールバック保証
 
@@ -551,7 +552,6 @@ GET https://www.googleapis.com/youtube/v3/videos
 GET https://www.googleapis.com/youtube/v3/search
   ?part=snippet
   &type=video
-  &videoCategoryId={categoryId}
   &q={searchQuery}
   &order=viewCount
   &regionCode=JP
@@ -559,6 +559,7 @@ GET https://www.googleapis.com/youtube/v3/search
   &maxResults=8
   &key={API_KEY}
 ```
+※ `videoCategoryId`は使用しない。YouTubeのカテゴリはアプリのジャンルと1:1で対応しないため、`q`（検索キーワード）のみで絞り込みを行う。
 
 **tRPC レスポンス構造**
 

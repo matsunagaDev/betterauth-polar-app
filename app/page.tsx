@@ -1,4 +1,5 @@
 import { SubscriptionButtons } from "@/components/features/home/subscription-buttons";
+import { VideoGrid } from "@/components/features/home/video-grid";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -30,10 +31,11 @@ export default async function Home() {
   }
 
   return (
-    <div className="w-full h-svh flex items-center justify-center">
-      Home page Hello World
-      <SubscriptionButtons />
+    <div className="mx-auto w-full max-w-7xl px-4 py-8 space-y-6">
+      <div className="flex items-center justify-end">
+        <SubscriptionButtons />
+      </div>
+      <VideoGrid isAuthenticated={!!session} />
     </div>
-
   );
 }
