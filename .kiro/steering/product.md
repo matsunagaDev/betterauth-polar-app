@@ -4,7 +4,7 @@ Polar を決済基盤とした動画サブスクリプションサービス。Be
 
 ## コア機能
 
-1. **多段階認証** -- メール/パスワード、GitHub OAuth、匿名（ゲスト）ログイン
+1. **多段階認証** -- メール/パスワード、GitHub OAuth、Google OAuth、匿名（ゲスト）ログイン
 2. **サブスクリプション決済** -- Polar ホスト型チェックアウト、カスタマーポータル、状態管理
 3. **動画アクセス制御** -- 無料/有料コンテンツの出し分け（サブスク連動）
 4. **型安全 API** -- tRPC による認証・サブスク状態に応じたプロシージャ階層
@@ -23,9 +23,11 @@ Polar を決済基盤とした動画サブスクリプションサービス。Be
 
 ## 現在の実装状態
 
-- **Phase 1-3 完了**: 認証、tRPC API 基盤、Polar サブスクリプション統合
-- **Phase 4-5 未着手**: 動画スキーマ・UI（MVP の残りタスク）
-- Docker 開発/本番環境の設定ファイルは作成済み
+- **Phase 1-3 完了**: 認証（GitHub/Google OAuth）、tRPC API 基盤、Polar サブスクリプション統合
+- **オンボーディング完了**: ジャンル選択（最大3つ）、DBスキーマ（genres テーブル、users.onboardingCompleted）
+- **Docker 完了**: 開発/本番環境の Dockerfile + docker-compose.yml
+- **Playwright E2E テスト導入済み**
+- **次の実装対象**: メインページ YouTube 動画グリッド表示（`.kiro/specs/youtube-video-grid/`）
 
 ## 拡張ビジョン
 

@@ -24,6 +24,7 @@ Next.js App Router によるフルスタック構成。サーバーコンポー�
 | バリデーション | zod 4.3.6 | スキーマバリデーション |
 | フォーム | react-hook-form 7.70.0 | フォーム状態管理 |
 | シリアライズ | superjson 2.2.6 | tRPC データ変換 |
+| アイコン | react-icons 5.5.0 | Google 等のブランドアイコン |
 
 ## 開発基準
 
@@ -40,7 +41,9 @@ Next.js App Router によるフルスタック構成。サーバーコンポー�
 
 ### テスト
 
-- 未導入（Phase 5 以降で検討）
+- Playwright（E2E テスト）導入済み
+- `e2e/` ディレクトリにテストファイル配置
+- `pnpm test:e2e` / `pnpm test:e2e:ui` で実行
 
 ## 開発環境
 
@@ -80,8 +83,8 @@ docker compose -f docker-compose.prod.yml up
 
 - **開発用**: `Dockerfile` + `docker-compose.yml` -- ホットリロード対応（ボリュームマウント）
 - **本番用**: `Dockerfile.prod` + `docker-compose.prod.yml` -- `pnpm build` + `pnpm start`
-- ベースイメージ: `node:20-alpine`
-- pnpm は corepack 経由で有効化
+- ベースイメージ: `node:22-alpine`
+- pnpm 10.16.0 は corepack 経由で有効化
 
 ## 主要技術決定
 

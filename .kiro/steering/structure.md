@@ -9,7 +9,7 @@
 ### ページ
 **場所**: `app/`
 **目的**: Next.js App Router のルーティングとページコンポーネント
-**例**: `app/(auth)/sign-in/page.tsx`, `app/page.tsx`
+**例**: `app/(auth)/sign-in/page.tsx`, `app/page.tsx`, `app/onboarding/page.tsx`
 
 ### ルートグループ
 **場所**: `app/(group-name)/`
@@ -24,7 +24,7 @@
 ### 機能コンポーネント
 **場所**: `components/features/{feature-name}/`
 **目的**: 特定機能に紐づく UI コンポーネント
-**例**: `components/features/auth/sign-in-view.tsx`, `components/features/home/subscription-buttons.tsx`
+**例**: `components/features/auth/sign-in-view.tsx`, `components/features/home/subscription-buttons.tsx`, `components/features/onboarding/onboarding-view.tsx`
 
 ### UI コンポーネント
 **場所**: `components/ui/`
@@ -34,7 +34,7 @@
 ### tRPC ルーター
 **場所**: `trpc/routers/`
 **目的**: 型安全な API プロシージャ定義
-**例**: `trpc/routers/_app.ts`（ルートルーター）
+**例**: `trpc/routers/_app.ts`（ルートルーター）, `trpc/routers/genre.ts`, `trpc/routers/onboarding.ts`
 
 ### tRPC 基盤
 **場所**: `trpc/`
@@ -44,7 +44,7 @@
 ### DB スキーマ
 **場所**: `db/schemas/`
 **目的**: Drizzle ORM テーブル定義とリレーション
-**例**: `db/schemas/auth.ts`（認証テーブル群）, `db/schemas/posts.ts`
+**例**: `db/schemas/auth.ts`（認証テーブル群）, `db/schemas/genres.ts`（ジャンルテーブル）
 
 ### DB インスタンス
 **場所**: `db/index.ts`
@@ -66,10 +66,15 @@
 **目的**: Drizzle Kit が自動生成するマイグレーションファイル
 **管理**: `pnpm drizzle-kit generate` で生成、`pnpm drizzle-kit migrate` で適用
 
+### E2E テスト
+**場所**: `e2e/`
+**目的**: Playwright E2E テストファイル
+**例**: `e2e/onboarding.spec.ts`
+
 ### ドキュメント
 **場所**: `docs/`
-**目的**: プロジェクト計画書や設計ドキュメント
-**例**: `docs/PLAN.md`（実装ロードマップ）
+**目的**: プロジェクト計画書や設計ドキュメント（.gitignore で除外）
+**例**: `docs/PLAN.md`（実装ロードマップ）, `docs/youtube-api-integration.md`
 
 ## 命名規則
 
@@ -104,8 +109,8 @@ import { videosRouter } from './videos';
 
 ## 注意事項
 
-- `src/db/schema.ts` は Drizzle Kit が生成した参照用ファイル。実際のスキーマ定義は `db/schemas/` にある
 - ルートルーターのファイル名は `_app.ts`（アンダースコアプレフィックス）
+- `db/schemas/posts.ts` は削除済み（未使用のため）
 
 ---
 _パターンを記述する。新しいファイルがパターンに従えば、このドキュメントの更新は不要_
