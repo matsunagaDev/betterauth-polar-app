@@ -8,6 +8,20 @@
       "when": 1770302654702,
       "tag": "0000_yummy_slipstream",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1772291262637,
+      "tag": "0001_tiresome_mastermind",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1772327217230,
+      "tag": "0002_demonic_ghost_rider",
+      "breakpoints": true
     }
   ]
 }

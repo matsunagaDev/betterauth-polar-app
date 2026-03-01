@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/libsql/web';
 import * as authSchemas from "./schemas/auth";
-import * as postSchemas from "./schemas/posts";
+
+import * as genreSchemas from "./schemas/genres";
 
 
 export const db = drizzle({
@@ -11,6 +12,6 @@ export const db = drizzle({
   },
   schema: {
     ...authSchemas,
-    ...postSchemas
+    ...genreSchemas
   },
 });

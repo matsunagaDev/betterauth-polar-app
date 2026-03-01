@@ -1,285 +1,431 @@
-# Technical Design: auth-expansion (Google OAuth)
+# Technical Design: auth-expansion (オンボーディング)
+
+> **Note**: Google OAuth 認証（Requirement 1）の設計と実装は完了済み。本ドキュメントはオンボーディングフロー（Requirement 4）に焦点を当てる。
 
 ## Overview
 
-**Purpose**: 本機能は既存の Better Auth 認証基盤に Google OAuth 認証を追加し、ユーザーが Google アカウントでサインイン可能にする。
+**Purpose**: 本機能は初回ログインユーザーに対してジャンル選択オンボーディングフローを提供し、パーソナライズされたコンテンツ推薦の基盤を構築する。
 
-**Users**: エンドユーザーが Google アカウントを用いて、メール/パスワードを管理する手間なくアプリケーションにアクセスする。
+**Users**: 新規ユーザーが初回ログイン時にオンボーディング画面でジャンルを選択し、アプリケーションの利用を開始する。既存ユーザーはオンボーディングをスキップしてメインページに直接アクセスする。
 
-**Impact**: 既存のサインインページに Google OAuth ボタンを追加し、Better Auth の `socialProviders` 設定と環境変数を整備する。スキーマ変更は不要。既存の GitHub OAuth と同一パターンを踏襲する。
+**Impact**: `users` テーブルにオンボーディング完了フラグとジャンル情報のカラムを追加する。保護ページのサーバーコンポーネントにオンボーディング状態チェックを導入し、tRPC ルーターにオンボーディング関連のプロシージャを追加する。
 
 ### Goals
-- Google OAuth による認証フローの完全な動作（認可リクエスト、コールバック処理、セッション確立）
-- 同一メールアドレスを持つ既存アカウントとの自動リンク
-- エラー発生時の適切なフィードバック表示
-- 既存の認証パターン（GitHub OAuth）との一貫性維持
+- 初回ログインユーザーのオンボーディング画面への自動リダイレクト
+- ジャンル一覧の表示と選択機能の提供
+- 選択ジャンルの永続化とオンボーディング完了フラグの設定
+- オンボーディング未完了ユーザーの保護ページアクセス制御
+- オンボーディングのスキップ機能
 
 ### Non-Goals
 - LINE 認証の実装（Requirement 2 -- 別途対応）
 - プロフィール編集機能（Requirement 3 -- 別途対応）
-- オンボーディングフロー（Requirement 4 -- 別途対応）
-- Google API の追加スコープ（Drive、Gmail 等）へのアクセス
-- リフレッシュトークンの永続的管理
+- ジャンルに基づくコンテンツ推薦ロジックの実装
+- ジャンルマスターデータの管理画面
+- オンボーディング完了後のジャンル再編集（プロフィール編集で対応予定）
 
 ## Architecture
 
 ### Existing Architecture Analysis
 
-現在のシステムは以下の認証パターンを実装済みである。
+現在のシステムは以下のパターンを実装済みである。
 
-- **Better Auth サーバー設定** (`lib/auth.ts`): `emailAndPassword`、`socialProviders.github`、`anonymous` プラグイン、Polar プラグインを構成済み。`socialProviders.google` の設定エントリも既に存在する。
-- **Better Auth クライアント** (`lib/auth-client.ts`): `anonymousClient`、`polarClient` プラグインを構成済み。`signIn.social` メソッドは GitHub OAuth で利用実績あり。
-- **サインイン UI** (`components/features/auth/sign-in-view.tsx`): メール/パスワードフォーム、ゲストログインボタン、GitHub OAuth ボタンを表示。各認証の状態管理（`isLoading`、`error`）を統一的に管理。
-- **DB スキーマ** (`db/schemas/auth.ts`): `accounts` テーブルが `provider_id`、`account_id` を持ち、複数プロバイダーの紐付けに対応済み。
-- **tRPC プロシージャ階層** (`trpc/init.ts`): `baseProcedure` / `protectedProcedure` / `subscribeProcedure` が定義済み。セッション取得は `auth.api.getSession` を使用。
+- **認証基盤** (`lib/auth.ts`): Better Auth によるメール/パスワード、GitHub OAuth、Google OAuth、匿名ログインを構成済み
+- **保護ページ制御** (`app/page.tsx`): サーバーコンポーネントで `auth.api.getSession` を呼び出し、未認証ユーザーを `/sign-in` へリダイレクト
+- **tRPC プロシージャ階層** (`trpc/init.ts`): `baseProcedure` / `protectedProcedure` / `subscribeProcedure` が定義済み。セッション情報は `ctx.auth` で利用可能
+- **DB スキーマ** (`db/schemas/auth.ts`): `users` テーブルに `id`, `name`, `email`, `image`, `isAnonymous` 等のカラムが存在。オンボーディング関連フィールドは未定義
 
 ### Architecture Pattern & Boundary Map
 
-Google OAuth の追加は既存アーキテクチャの拡張であり、新たな境界やコンポーネントの導入は不要である。
+オンボーディングフローは既存アーキテクチャの拡張として実装する。新たなアーキテクチャパターンの導入は不要。
 
 ```mermaid
-sequenceDiagram
-    participant User as User Browser
-    participant SignIn as SignInView
-    participant AuthClient as Better Auth Client
-    participant AuthServer as Better Auth Server
-    participant Google as Google OAuth
-    participant DB as Turso DB
+graph TB
+    subgraph Client
+        OnboardingPage[Onboarding Page]
+        ProtectedPage[Protected Pages]
+    end
+    subgraph tRPC
+        OnboardingRouter[onboarding Router]
+        GenreRouter[genre Router]
+    end
+    subgraph Data
+        UsersTable[users Table]
+        GenreConstants[Genre Constants]
+    end
 
-    User->>SignIn: Google でログインをクリック
-    SignIn->>AuthClient: signIn.social provider google
-    AuthClient->>AuthServer: POST /api/auth/sign-in/social
-    AuthServer->>Google: 認可リクエスト redirect
-    Google->>User: Google ログイン画面
-    User->>Google: 認証情報入力
-    Google->>AuthServer: GET /api/auth/callback/google code
-    AuthServer->>Google: アクセストークン取得
-    Google-->>AuthServer: ユーザー情報 email name image
-    AuthServer->>DB: ユーザー検索 or 作成 アカウントリンク
-    AuthServer->>DB: セッション作成
-    AuthServer->>User: callbackURL へリダイレクト
+    ProtectedPage -->|onboarding check| UsersTable
+    OnboardingPage -->|genre list| GenreRouter
+    OnboardingPage -->|complete onboarding| OnboardingRouter
+    OnboardingRouter -->|update user| UsersTable
+    GenreRouter -->|read| GenreConstants
+    OnboardingRouter -->|protectedProcedure| tRPC
 ```
 
 **Architecture Integration**:
-- **Selected pattern**: 既存の Better Auth socialProviders パターンを踏襲
-- **Domain/feature boundaries**: 認証ドメイン内の変更のみ。tRPC・Polar 統合への影響なし
-- **Existing patterns preserved**: GitHub OAuth と同一の `signIn.social` フロー、同一のエラーハンドリングパターン
-- **New components rationale**: 新規コンポーネントの追加は不要。既存コンポーネントの拡張のみ
-- **Steering compliance**: TypeScript strict mode、Feature-first 構造、shadcn/ui コンポーネント利用を維持
+- **Selected pattern**: 既存の Feature-first + tRPC プロシージャ階層パターンを踏襲
+- **Domain/feature boundaries**: オンボーディングは認証ドメインの拡張。`components/features/onboarding/` と `trpc/routers/onboarding.ts` に集約
+- **Existing patterns preserved**: サーバーコンポーネントでのリダイレクト制御、`protectedProcedure` による認証チェック、Drizzle ORM によるデータアクセス
+- **New components rationale**: オンボーディング UI コンポーネント（ジャンル選択画面）、tRPC ルーター（オンボーディング状態管理）、DB スキーマ拡張（完了フラグ・ジャンル保存）が必要
+- **Steering compliance**: TypeScript strict mode、Feature-first 構造、shadcn/ui コンポーネント利用、tRPC による型安全 API を維持
 
 ### Technology Stack
 
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
-| Frontend | React 19 + Next.js 16 | サインイン UI の Google ボタン追加 | 既存コンポーネントの拡張 |
-| Backend | better-auth 1.3.26 | Google OAuth フロー処理、セッション管理 | `socialProviders.google` 設定済み |
-| Data | Turso (libSQL) + Drizzle ORM | accounts テーブルへの Google プロバイダー保存 | スキーマ変更不要 |
-| UI | shadcn/ui + lucide-react | Google ボタンアイコン | lucide-react に Google アイコンがない場合は SVG で対応 |
+| Frontend | React 19 + Next.js 16 | オンボーディング UI、サーバーコンポーネントでのリダイレクト制御 | 既存パターンの拡張 |
+| Backend | tRPC 11.9 + better-auth 1.3.26 | オンボーディング API プロシージャ、セッション管理 | `protectedProcedure` を利用 |
+| Data | Turso (libSQL) + Drizzle ORM 0.45 | `users` テーブルへのカラム追加、ジャンルデータの永続化 | マイグレーション必要 |
+| UI | shadcn/ui + Tailwind v4 | ジャンル選択 UI コンポーネント | 既存コンポーネントライブラリを活用 |
+| Validation | zod 4.3 | オンボーディング入力のバリデーション | tRPC input スキーマで利用 |
 
 ## System Flows
 
-### Google OAuth 認証フロー（正常系）
-
-上記シーケンス図に示す通り。Better Auth がコールバック処理、トークン交換、ユーザー作成/リンク、セッション確立を自動で行う。
-
-### エラーフロー
+### オンボーディングリダイレクトフロー
 
 ```mermaid
 flowchart TD
-    A[Google OAuth コールバック受信] --> B{認可コード有効?}
-    B -- Yes --> C{ユーザー情報取得成功?}
-    B -- No --> E[サインインページへリダイレクト エラー表示]
-    C -- Yes --> D{アカウント処理成功?}
-    C -- No --> E
-    D -- Yes --> F[callbackURL へリダイレクト]
-    D -- No --> E
+    A[ユーザーがログイン完了] --> B[保護ページにアクセス]
+    B --> C{セッション存在?}
+    C -- No --> D[/sign-in へリダイレクト/]
+    C -- Yes --> E{onboarding_completed?}
+    E -- Yes --> F[保護ページを表示]
+    E -- No --> G[/onboarding へリダイレクト/]
+    G --> H[ジャンル選択画面表示]
+    H --> I{ユーザーの選択}
+    I -->|ジャンル選択して完了| J[ジャンル保存 + 完了フラグ設定]
+    I -->|スキップ| K[完了フラグのみ設定]
+    J --> L[メインページへリダイレクト]
+    K --> L
 ```
 
 **Key Decisions**:
-- Better Auth はコールバックエラー時に自動的にエラー URL へリダイレクトする。クライアント側で `error` state を検知して toast 表示する
-- ネットワークエラー等の `signIn.social` 呼び出し失敗は try/catch で捕捉し、GitHub OAuth と同一パターンでハンドリングする
+- オンボーディングチェックはサーバーコンポーネントで実行する。Middleware は Better Auth のセッション API 呼び出しが必要でパフォーマンスの懸念があるため採用しない
+- `/onboarding` ページ自体はオンボーディングチェックの対象外とし、リダイレクトループを防止する
+
+### オンボーディング完了シーケンス
+
+```mermaid
+sequenceDiagram
+    participant User as User Browser
+    participant Page as Onboarding Page
+    participant tRPC as tRPC Router
+    participant DB as Turso DB
+
+    User->>Page: ジャンルを選択して完了ボタンをクリック
+    Page->>tRPC: onboarding.complete genres
+    tRPC->>tRPC: protectedProcedure session check
+    tRPC->>DB: UPDATE users SET genres onboarding_completed
+    DB-->>tRPC: success
+    tRPC-->>Page: success response
+    Page->>User: メインページへリダイレクト
+```
 
 ## Requirements Traceability
 
 | Requirement | Summary | Components | Interfaces | Flows |
 |-------------|---------|------------|------------|-------|
-| 1.1 | Google OAuth 認可フロー開始 | SignInView, AuthClient | signIn.social | Google OAuth 認証フロー |
-| 1.2 | コールバック処理、アカウント作成/リンク、セッション確立 | Better Auth Server (既存) | /api/auth/callback/google | Google OAuth 認証フロー |
-| 1.3 | OAuth エラー時のリダイレクトとエラー表示 | SignInView | error state, toast | エラーフロー |
-| 1.4 | 同一メールの既存アカウントへの Google プロバイダー紐付け | Better Auth Server (既存) | accountLinking (デフォルト有効) | Google OAuth 認証フロー |
-
-> Requirement 5.1（サインインページの統合表示）および 5.2（ローディング状態）も Google OAuth ボタン追加に伴い部分的に対応される。
+| 4.1 | 初回ログイン後にオンボーディング画面へリダイレクト | OnboardingGuard, Protected Pages | getOnboardingStatus | オンボーディングリダイレクトフロー |
+| 4.2 | 選択可能なジャンル一覧を表示 | OnboardingView, GenreSelector | genre.list | -- |
+| 4.3 | 選択ジャンルの保存と完了フラグの設定 | OnboardingView, onboarding Router | onboarding.complete | オンボーディング完了シーケンス |
+| 4.4 | オンボーディング完了後にメインページへリダイレクト | OnboardingView | -- | オンボーディング完了シーケンス |
+| 4.5 | オンボーディング未完了ユーザーの保護ページアクセス時リダイレクト | OnboardingGuard | getOnboardingStatus | オンボーディングリダイレクトフロー |
+| 4.6 | オンボーディング完了済みユーザーのスキップ | OnboardingGuard | getOnboardingStatus | オンボーディングリダイレクトフロー |
+| 4.7 | ジャンル未選択でのオンボーディングスキップ | OnboardingView | onboarding.complete | オンボーディング完了シーケンス |
+| 6.2 | protectedProcedure でオンボーディングエンドポイント提供 | onboarding Router | protectedProcedure | -- |
+| 6.3 | baseProcedure でジャンル一覧取得提供 | genre Router | baseProcedure | -- |
 
 ## Components and Interfaces
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies (P0/P1) | Contracts |
 |-----------|--------------|--------|--------------|--------------------------|-----------|
-| SignInView | UI / Auth | サインインページに Google OAuth ボタンを追加 | 1.1, 1.3 | AuthClient (P0), lucide-react or SVG (P1) | State |
-| Better Auth Server Config | Backend / Auth | Google OAuth プロバイダー設定 | 1.2, 1.4 | Google OAuth API (P0), Turso DB (P0) | Service |
-| Environment Config | Infra / Config | Google OAuth 環境変数の定義 | 1.1, 1.2 | Google Cloud Console (P0) | -- |
+| OnboardingGuard | Shared / Auth | 保護ページでオンボーディング未完了ユーザーをリダイレクトする | 4.1, 4.5, 4.6 | auth.api.getSession (P0), Drizzle ORM (P0) | -- |
+| OnboardingView | UI / Onboarding | オンボーディング画面のジャンル選択 UI | 4.2, 4.3, 4.4, 4.7 | tRPC Client (P0), GenreSelector (P1) | State |
+| GenreSelector | UI / Onboarding | ジャンル一覧の表示と選択操作 | 4.2 | shadcn/ui (P1) | State |
+| onboarding Router | Backend / tRPC | オンボーディング完了処理の API | 4.3, 4.7, 6.2 | protectedProcedure (P0), Drizzle ORM (P0) | Service |
+| genre Router | Backend / tRPC | ジャンル一覧取得 API | 4.2, 6.3 | baseProcedure (P0), Genre Constants (P0) | Service |
+| Genre Constants | Shared / Constants | ジャンルマスターデータの定義 | 4.2 | -- | -- |
+| users Schema Extension | Data / Schema | オンボーディング関連カラムの追加 | 4.3 | Drizzle ORM (P0) | -- |
 
-### UI / Auth
+### Shared / Auth
 
-#### SignInView (既存コンポーネント拡張)
+#### OnboardingGuard
 
 | Field | Detail |
 |-------|--------|
-| Intent | サインインページに Google OAuth ボタンを追加し、認証フローを開始する |
-| Requirements | 1.1, 1.3 |
+| Intent | 保護ページのサーバーコンポーネントでオンボーディング未完了ユーザーを `/onboarding` へリダイレクトする |
+| Requirements | 4.1, 4.5, 4.6 |
 
 **Responsibilities & Constraints**
-- Google OAuth ボタンの表示とクリックイベント処理
-- `isLoading` 状態の共有管理（他の認証ボタンとの排他制御）
-- エラー発生時の toast 通知と error state 表示
-- 既存の GitHub OAuth ボタンと同一の UX パターンを維持
+- セッション取得後にユーザーの `onboarding_completed` フラグを DB から確認する
+- 未完了の場合は `redirect("/onboarding")` を呼び出す
+- 完了済みの場合は何もしない（ページ描画を続行）
+- `/onboarding` ページ自体ではこのガードを適用しない（リダイレクトループ防止）
+- 匿名ユーザー（`isAnonymous: true`）はオンボーディング対象外とする
 
 **Dependencies**
-- Outbound: `authClient.signIn.social` -- Google OAuth フロー開始 (P0)
-- External: Google アイコン -- lucide-react に含まれない場合は SVG アイコンを使用 (P1)
+- External: `auth.api.getSession` -- セッションからユーザー ID を取得 (P0)
+- External: Drizzle ORM -- `users` テーブルからオンボーディング状態をクエリ (P0)
+
+**Contracts**: なし（サーバーサイドユーティリティ関数として実装）
+
+```typescript
+// サーバーコンポーネントから呼び出す非同期関数
+type CheckOnboardingStatus = (userId: string) => Promise<{
+  completed: boolean;
+  genres: string[];
+}>;
+```
+
+**Implementation Notes**
+- Integration: 既存の `app/page.tsx` のセッション確認パターンを拡張する。セッション取得後に `users` テーブルから `onboarding_completed` を問い合わせる
+- Validation: `userId` はセッションから取得するため、追加バリデーション不要
+- Risks: 保護ページが増えるたびにチェック呼び出しが必要。共通レイアウトでの一括適用を推奨
+
+### UI / Onboarding
+
+#### OnboardingView
+
+| Field | Detail |
+|-------|--------|
+| Intent | オンボーディング画面のメイン UI。ジャンル選択と完了/スキップ操作を提供する |
+| Requirements | 4.2, 4.3, 4.4, 4.7 |
+
+**Responsibilities & Constraints**
+- ジャンル一覧を tRPC 経由で取得して `GenreSelector` に渡す
+- 選択されたジャンルの状態を管理する
+- 「完了」ボタンクリック時に選択ジャンルを `onboarding.complete` プロシージャに送信する
+- 「スキップ」ボタンクリック時にジャンル未選択のまま `onboarding.complete` を呼び出す
+- 完了/スキップ後にメインページ (`/`) へリダイレクトする
+- 処理中の状態表示（ローディング）
+
+**Dependencies**
+- Outbound: tRPC Client (`trpc.onboarding.complete`) -- オンボーディング完了送信 (P0)
+- Outbound: tRPC Client (`trpc.genre.list`) -- ジャンル一覧取得 (P0)
+- Inbound: GenreSelector -- ジャンル選択 UI (P1)
 
 **Contracts**: State [x]
 
 ##### State Management
 
 ```typescript
-// 既存の state をそのまま利用（追加の state は不要）
-// isLoading: boolean -- 全認証ボタンの排他制御
-// error: string | null -- エラーメッセージ表示
+interface OnboardingViewState {
+  selectedGenres: string[];        // 選択されたジャンル ID の配列
+  isSubmitting: boolean;           // 送信処理中フラグ
+  error: string | null;            // エラーメッセージ
+}
 
-// Google OAuth ハンドラ（GitHub OAuth と同一パターン）
-type HandleGoogleSignIn = () => Promise<void>;
+// ジャンル選択トグル
+type ToggleGenre = (genreId: string) => void;
+
+// オンボーディング完了（ジャンル送信）
+type HandleComplete = () => Promise<void>;
+
+// オンボーディングスキップ（ジャンル未選択で完了）
+type HandleSkip = () => Promise<void>;
 ```
 
 **Implementation Notes**
-- Integration: `handleGitHubSignIn` と同一パターンで `handleGoogleSignIn` を実装。`provider: "google"` を指定
-- Validation: `isLoading` 中は全ボタンを `disabled` にする（既存動作）
-- Risks: lucide-react に Google アイコンが存在しない場合、カスタム SVG アイコンコンポーネントの作成が必要
+- Integration: `"use client"` コンポーネント。`trpc.genre.list.useQuery` でジャンル一覧を取得し、`trpc.onboarding.complete.useMutation` で完了を送信する
+- Validation: 「完了」ボタンはジャンルが 1 つ以上選択されている場合のみ有効化する。「スキップ」は常に有効
+- Risks: ネットワークエラー時の再試行機能。toast でエラー通知し、ボタンを再有効化する
 
-### Backend / Auth
+#### GenreSelector (Summary-only)
 
-#### Better Auth Server Config (既存設定の整備)
+ジャンル一覧をカード形式またはチップ形式で表示し、複数選択を受け付けるプレゼンテーションコンポーネント。props として `genres: Genre[]`, `selectedGenreIds: string[]`, `onToggle: (genreId: string) => void`, `disabled: boolean` を受け取る。shadcn/ui の `Button` (variant="outline") または `Toggle` を活用する。
+
+### Backend / tRPC
+
+#### onboarding Router
 
 | Field | Detail |
 |-------|--------|
-| Intent | Better Auth の Google OAuth プロバイダー設定を完備し、認証フロー全体を処理する |
-| Requirements | 1.2, 1.4 |
+| Intent | オンボーディング完了処理を protectedProcedure で提供する |
+| Requirements | 4.3, 4.7, 6.2 |
 
 **Responsibilities & Constraints**
-- Google OAuth 認可リクエストの生成とリダイレクト
-- コールバック URL (`/api/auth/callback/google`) でのトークン交換
-- ユーザー情報取得（email, name, image）とアカウント作成/リンク
-- セッション確立と `callbackURL` へのリダイレクト
-- アカウントリンク: デフォルトで有効。同一メールアドレスかつ Google がメール検証済みの場合に自動リンク
+- `protectedProcedure` を使用し、認証済みユーザーのみアクセス可能
+- ジャンル ID 配列（空配列許容）を受け取り、`users` テーブルを更新する
+- `onboarding_completed` フラグを `true` に設定する
+- `genres` カラムに選択されたジャンル ID を JSON 形式で保存する
+- 不正なジャンル ID のバリデーション
 
 **Dependencies**
-- External: Google OAuth 2.0 API -- 認可・トークン交換・ユーザー情報取得 (P0)
-- External: Turso DB -- ユーザー/アカウント/セッションの永続化 (P0)
+- Inbound: tRPC Client -- オンボーディング完了リクエスト (P0)
+- External: protectedProcedure -- セッション認証チェック (P0)
+- External: Drizzle ORM -- `users` テーブル更新 (P0)
+- External: Genre Constants -- ジャンル ID のバリデーション (P0)
 
 **Contracts**: Service [x]
 
 ##### Service Interface
 
 ```typescript
-// Better Auth が内部的に処理するため、明示的なインターフェース定義は不要
-// 以下は Better Auth が提供する既存の API エンドポイント
+// onboarding.complete
+// Input
+interface CompleteOnboardingInput {
+  genres: string[];  // 選択されたジャンル ID の配列（空配列 = スキップ）
+}
 
-// POST /api/auth/sign-in/social
-// Request: { provider: "google", callbackURL?: string }
-// Response: redirect to Google OAuth
+// Output
+interface CompleteOnboardingOutput {
+  success: boolean;
+}
 
-// GET /api/auth/callback/google
-// Request: { code: string, state: string } (Google からのコールバック)
-// Response: redirect to callbackURL with session cookie
+// onboarding.status
+// Input: なし（セッションから userId を取得）
+// Output
+interface OnboardingStatusOutput {
+  completed: boolean;
+  genres: string[];
+}
 ```
 
-- Preconditions: `GOOGLE_CLIENT_ID` および `GOOGLE_CLIENT_SECRET` 環境変数が設定済みであること
-- Postconditions: 認証成功時に `accounts` テーブルに `provider_id: "google"` のレコードが作成/更新される
-- Invariants: 1 ユーザーにつき Google プロバイダーのアカウントレコードは最大 1 つ
+- Preconditions: ユーザーが認証済みであること。ジャンル ID が定義済みマスターデータに含まれること（空配列は許容）
+- Postconditions: `users.onboarding_completed` が `true` に更新される。`users.genres` に JSON 形式でジャンル ID が保存される
+- Invariants: 1 ユーザーにつきオンボーディング完了処理は冪等（既に完了済みの場合も成功を返す）
 
 **Implementation Notes**
-- Integration: `lib/auth.ts` の `socialProviders.google` 設定は既に存在する。環境変数 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` の追加のみ必要
-- Validation: Better Auth が OAuth コールバックの state パラメータを検証し、CSRF 攻撃を防止する
-- Risks: Google Cloud Console でリダイレクト URI を正確に設定しないと `redirect_uri_mismatch` エラーが発生する
+- Integration: `trpc/routers/onboarding.ts` に定義し、ルートルーター (`_app.ts`) に追加する
+- Validation: zod スキーマで `genres` を `z.array(z.string())` として定義。各ジャンル ID をマスターデータと照合し、不正な ID が含まれる場合は `BAD_REQUEST` エラーを返す
+- Risks: 同一ユーザーからの同時リクエストによる競合。冪等な設計のため、最後の書き込みが優先されるが問題なし
 
-### Infra / Config
-
-#### Environment Config (環境変数追加)
+#### genre Router
 
 | Field | Detail |
 |-------|--------|
-| Intent | Google OAuth に必要な環境変数を定義する |
-| Requirements | 1.1, 1.2 |
+| Intent | ジャンル一覧取得を baseProcedure で提供する |
+| Requirements | 4.2, 6.3 |
 
 **Responsibilities & Constraints**
-- `.env.example` に `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` を追加
-- Google Cloud Console での OAuth クライアント作成手順の明示
+- `baseProcedure` を使用し、認証不要でアクセス可能
+- ジャンルマスターデータの定数配列を返す
+
+**Dependencies**
+- External: Genre Constants -- ジャンルマスターデータ (P0)
+
+**Contracts**: Service [x]
+
+##### Service Interface
+
+```typescript
+// genre.list
+// Input: なし
+// Output
+interface Genre {
+  id: string;       // ジャンル ID（例: "action", "comedy"）
+  label: string;    // 表示名（例: "アクション", "コメディ"）
+  icon?: string;    // オプショナルなアイコン識別子
+}
+
+type GenreListOutput = Genre[];
+```
+
+- Preconditions: なし
+- Postconditions: 全ジャンルの配列を返す
+- Invariants: ジャンル一覧はアプリケーションのライフサイクル内で不変
 
 **Implementation Notes**
-- Integration: `.env.example` にエントリを追加。`lib/auth.ts` は既に `process.env.GOOGLE_CLIENT_ID!` / `process.env.GOOGLE_CLIENT_SECRET!` を参照している
-- Validation: 環境変数未設定時に Better Auth が起動時エラーを出すか確認が必要
-- Risks: 本番環境デプロイ時に環境変数の設定漏れが発生しうる
+- Integration: `trpc/routers/genre.ts` に定義し、ルートルーター (`_app.ts`) に追加する
+- Validation: 入力なし。出力は定数配列のため追加バリデーション不要
+- Risks: なし（静的データの返却のみ）
+
+### Shared / Constants
+
+#### Genre Constants (Summary-only)
+
+`lib/constants/genres.ts` にジャンルマスターデータを `Genre[]` 型の定数として定義する。フロントエンドとバックエンドの両方から参照される共有モジュール。ジャンルの追加・変更はこのファイルの編集のみで完結する。
 
 ## Data Models
 
 ### Domain Model
 
-Google OAuth の追加によるドメインモデルの変更はない。既存の `users` / `accounts` / `sessions` の関係がそのまま適用される。
+```mermaid
+erDiagram
+    USER {
+        string id PK
+        string name
+        string email
+        boolean onboarding_completed
+        json genres
+    }
+    GENRE {
+        string id PK
+        string label
+        string icon
+    }
+    USER ||--o{ GENRE : selects
+```
 
-- **User**: 1 人のユーザーが複数の Account を持つ（email/password、GitHub、Google）
-- **Account**: `provider_id` フィールドで認証プロバイダーを識別（`"credential"` / `"github"` / `"google"`）
-- **Session**: 認証方法に関わらず同一のセッション構造
+- **User**: オンボーディング完了状態と選択ジャンルを保持する。`onboarding_completed` が `false` の場合、保護ページアクセス時にオンボーディング画面へリダイレクトされる
+- **Genre**: アプリケーション定数として定義される値オブジェクト。DB には永続化しない
+- **Business Rule**: オンボーディング完了フラグは一度 `true` に設定されると、通常フローでは `false` に戻さない
 
 ### Logical Data Model
 
-スキーマ変更は不要。Google OAuth ログイン時に `accounts` テーブルへ以下のレコードが挿入される。
+**`users` テーブル拡張**:
 
-| Column | Value |
-|--------|-------|
-| `id` | nanoid(10) で自動生成 |
-| `account_id` | Google ユーザー ID |
-| `provider_id` | `"google"` |
-| `user_id` | 紐付くユーザーの ID |
-| `access_token` | Google アクセストークン |
-| `refresh_token` | null（`accessType: "offline"` 未設定のため） |
-| `id_token` | Google ID トークン |
-| `access_token_expires_at` | トークン有効期限 |
-| `scope` | 要求したスコープ |
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `onboarding_completed` | `integer` (boolean mode) | `DEFAULT false`, `NOT NULL` | オンボーディング完了フラグ |
+| `genres` | `text` | `DEFAULT NULL` | 選択されたジャンル ID の JSON 配列（例: `'["action","comedy"]'`） |
+
+**Consistency & Integrity**:
+- `onboarding_completed` と `genres` の更新は単一の UPDATE 文で実行し、トランザクションの一貫性を保証する
+- `genres` カラムは NULL 許容。スキップ時は空配列 `'[]'` を保存する
+
+### Physical Data Model
+
+**Drizzle ORM スキーマ追加定義**:
+
+```typescript
+// db/schemas/auth.ts への追加カラム
+onboardingCompleted: integer("onboarding_completed", { mode: "boolean" })
+  .default(false)
+  .notNull(),
+genres: text("genres"),  // JSON string: '["action","comedy"]'
+```
+
+**マイグレーション**:
+- `ALTER TABLE users ADD COLUMN onboarding_completed INTEGER NOT NULL DEFAULT 0`
+- `ALTER TABLE users ADD COLUMN genres TEXT`
+- 既存ユーザーの `onboarding_completed` はデフォルト値 `0` (`false`) が設定される
 
 ## Error Handling
 
 ### Error Strategy
 
-Google OAuth 固有のエラーは Better Auth がコールバック処理内で捕捉し、エラー状態をクライアントに返す。クライアント側では既存の GitHub OAuth と同一のエラーハンドリングパターンを適用する。
+オンボーディングフローのエラーは tRPC のエラーハンドリングパターンに従い、クライアント側では toast 通知を使用する。
 
 ### Error Categories and Responses
 
 | Error Category | Trigger | Response |
 |---------------|---------|----------|
-| OAuth 認可拒否 | ユーザーが Google 画面でキャンセル | サインインページにリダイレクト。toast でエラー通知 |
-| redirect_uri_mismatch | Google Console の設定不一致 | Better Auth がエラーを返す。開発者が Console 設定を修正 |
-| アカウントリンク競合 | 稀なケース: 同時リクエスト等 | Better Auth のデフォルトエラーハンドリングに委任 |
-| ネットワークエラー | Google API 到達不能 | try/catch で捕捉。toast でエラー通知 |
+| 認証エラー (UNAUTHORIZED) | 未認証ユーザーがオンボーディング API にアクセス | tRPC が自動的に UNAUTHORIZED エラーを返す。クライアントはサインインページへリダイレクト |
+| バリデーションエラー (BAD_REQUEST) | 不正なジャンル ID が送信された | tRPC が BAD_REQUEST エラーを返す。クライアントは toast でエラー通知 |
+| ネットワークエラー | API 到達不能 | tRPC クライアントの onError で捕捉。toast でエラー通知し、再試行を許可 |
+| DB エラー (INTERNAL_SERVER_ERROR) | users テーブルの更新失敗 | tRPC が INTERNAL_SERVER_ERROR を返す。クライアントは toast で通知 |
 
 ## Testing Strategy
 
 ### Unit Tests
-- `handleGoogleSignIn` 関数のロジック: `signIn.social` が `provider: "google"` で呼び出されることを検証
-- `isLoading` 状態が正しく切り替わることを検証
-- エラーハンドリング: catch ブロックで toast と error state が設定されることを検証
+- `onboarding.complete` プロシージャ: 有効なジャンル ID で `onboarding_completed` が `true` に更新されることを検証
+- `onboarding.complete` プロシージャ: 空配列（スキップ）で `onboarding_completed` が `true` に設定されることを検証
+- `onboarding.complete` プロシージャ: 不正なジャンル ID で `BAD_REQUEST` エラーが返されることを検証
+- `genre.list` プロシージャ: 全ジャンルが返されることを検証
 
 ### Integration Tests
-- Google OAuth ボタンクリックから `authClient.signIn.social` 呼び出しまでのフロー
-- サインインページで全認証ボタン（ゲスト、メール/パスワード、GitHub、Google）が正しく表示されること
-- `isLoading` 中に全ボタンが disabled になること
+- オンボーディング未完了ユーザーが保護ページにアクセスした際に `/onboarding` へリダイレクトされること
+- オンボーディング完了済みユーザーが保護ページに直接アクセスできること
+- ジャンル選択 → 完了 → メインページリダイレクトの一連のフロー
 
 ### E2E Tests
-- Google OAuth 認証フロー全体（モックプロバイダー使用）
-- 新規ユーザーの Google OAuth サインアップ → セッション確立 → ホームページリダイレクト
-- 既存ユーザー（メール/パスワード登録済み）の Google OAuth サインイン → アカウントリンク確認
+- 新規ユーザーのサインアップ → オンボーディング画面表示 → ジャンル選択 → 完了 → メインページ到達
+- 新規ユーザーのサインアップ → オンボーディング画面表示 → スキップ → メインページ到達
+- 完了済みユーザーのログイン → オンボーディングスキップ → メインページ直接到達
 
 ## Security Considerations
 
-- **CSRF 保護**: Better Auth が OAuth state パラメータを使用して CSRF 攻撃を防止する（組み込み機能）
-- **トークン保管**: アクセストークンは `accounts` テーブルに保存される。DB アクセスは Turso のトランスポート暗号化で保護
-- **スコープ最小化**: デフォルトスコープ（`openid`, `email`, `profile`）のみを要求し、不要な権限は取得しない
-- **環境変数管理**: `GOOGLE_CLIENT_SECRET` は Git にコミットしない。`.env.example` にはキー名のみ記載
+- **認証チェック**: オンボーディング完了 API は `protectedProcedure` で保護されており、未認証ユーザーからのアクセスは拒否される
+- **入力バリデーション**: ジャンル ID はマスターデータとの照合によりバリデーションされる。任意の文字列の注入を防止する
+- **冪等性**: オンボーディング完了処理は冪等であり、重複リクエストによるデータ不整合は発生しない
