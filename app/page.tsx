@@ -1,4 +1,3 @@
-import { SubscriptionButtons } from "@/components/features/home/subscription-buttons";
 import { VideoGrid } from "@/components/features/home/video-grid";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
@@ -6,6 +5,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { users } from "@/db/schemas/auth";
 import { eq } from "drizzle-orm";
+import Link from "next/link";
 
 export default async function Home() {
 
@@ -33,7 +33,9 @@ export default async function Home() {
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-8 space-y-6">
       <div className="flex items-center justify-end">
-        <SubscriptionButtons />
+        <Link href="/mypage" className="text-sm text-blue-600 hover:underline">
+          マイページ
+        </Link>
       </div>
       <VideoGrid isAuthenticated={!!session} />
     </div>
